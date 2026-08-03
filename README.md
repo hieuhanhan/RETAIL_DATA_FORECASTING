@@ -1,6 +1,3 @@
-Here is a detailed, professional **`README.md`** tailored to your datathon submission. It comprehensively documents both your **Streamlit Executive BI Suite** and your **24.0% MAPE Time-Series Forecasting Engine**, highlighting the advanced engineering and statistical rigor you built into the project.
-
----
 
 ```markdown
 # 📊 Retail Datathon 2026 — Executive BI Suite & Forecasting Engine
