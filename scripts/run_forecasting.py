@@ -1,59 +1,94 @@
+import os
 import numpy as np
 import pandas as pd
 from sklearn.linear_model import Ridge
+from sklearn.metrics import mean_absolute_error, mean_absolute_percentage_error
 import lightgbm as lgb
-from prophet import Prophet
-import os
 
-# Define core constants mapping back to historical validation insights
+# ==========================================
+# 0. CORE CONSTANTS & LUNAR HOLIDAY LOOKUP
+# ==========================================
 TAU = 2 * np.pi
-TET_DATES = {2013: "2013-02-10", 2014: "2014-01-31", 2015: "2015-02-19", 2016: "2016-02-08",
-             2017: "2017-01-28", 2018: "2018-02-16", 2019: "2019-02-05", 2020: "2020-01-25",
-             2021: "2021-02-12", 2022: "2022-02-01", 2023: "2023-01-22", 2024: "2024-02-10"}
+TET_DATES = {
+    2011: "2011-02-03", 2012: "2012-01-23", 2013: "2013-02-10", 2014: "2014-01-31",
+    2015: "2015-02-19", 2016: "2016-02-08", 2017: "2017-01-28", 2018: "2018-02-16",
+    2019: "2019-02-05", 2020: "2020-01-25", 2021: "2021-02-12", 2022: "2022-02-01",
+    2023: "2023-01-22", 2024: "2024-02-10", 2025: "2025-01-29", 2026: "2026-02-17"
+}
 
 def build_features(dates):
-    """Generates absolute calendar features accessible across any horizon."""
-    df = pd.DataFrame({'Date': pd.to_datetime(dates)})
-    d = df['Date']
-    
-    df['year'] = d.dt.year
-    df['month'] = d.dt.month
-    df['day'] = d.dt.day
-    df['dow'] = d.dt.dayofweek
-    df['doy'] = d.dt.dayofyear
-    df['quarter'] = d.dt.quarter
-    df['is_weekend'] = (df['dow'] >= 5).astype(int)
-    df['is_odd_year'] = (df['year'] % 2).astype(int)
-    
-    # Structural Edge-of-month salary triggers
-    dim = d.dt.days_in_month
-    df['days_to_eom'] = dim - df['day']
-    for k in [1, 2, 3]:
-        df[f'is_last{k}'] = (df['days_to_eom'] <= k-1).astype(int)
-        df[f'is_first{k}'] = (df['day'] <= k).astype(int)
-        
-    # Multi-frequency Fourier transformation vectors for seasonality
-    for k in range(1, 6):
-        df[f'sin_y{k}'] = np.sin(TAU * k * df['doy'] / 365.25)
-        df[f'cos_y{k}'] = np.cos(TAU * k * df['doy'] / 365.25)
-    for k in range(1, 3):
-        df[f'sin_w{k}'] = np.sin(TAU * k * df['dow'] / 7.0)
-        df[f'cos_w{k}'] = np.cos(TAU * k * df['dow'] / 7.0)
+  """Generates calendar, seasonality, promo, and continuous trend features."""
+  df = pd.DataFrame({'Date': pd.to_datetime(dates)})
+  d = df['Date']
 
-    # Lunar Calendar Drift Calculator
-    tet_lut = {y: pd.Timestamp(v) for y, v in TET_DATES.items()}
-    def calculate_tet_dist(dt):
-        base_tet = tet_lut.get(dt.year)
-        return (dt - base_tet).days
-    df['tet_days_diff'] = d.apply(calculate_tet_dist)
-    df['tet_in_7'] = (np.abs(df['tet_days_diff']) <= 7).astype(int)
-    
-    return df
+  # 1. Standard Calendar Dimensions
+  df['year'] = d.dt.year
+  df['month'] = d.dt.month
+  df['day'] = d.dt.day
+  df['dow'] = d.dt.dayofweek
+  df['doy'] = d.dt.dayofyear
+  df['quarter'] = d.dt.quarter
+  df['is_weekend'] = (df['dow'] >= 5).astype(int)
+  df['is_odd_year'] = (df['year'] % 2).astype(int)
 
-# Initialize Datasets
-sales_df = pd.read_csv("data/sales.csv", parse_dates=["Date"])
+  # 2. Continuous Trend Index (CRITICAL for tree models to learn growth over time)
+  base_date = pd.Timestamp('2011-01-01')
+  df['time_idx'] = (d - base_date).dt.days
+
+  # 3. Structural Edge-of-Month Payday / Salary Triggers
+  dim = d.dt.days_in_month
+  df['days_to_eom'] = dim - df['day']
+  for k in [1, 2, 3]:
+    df[f'is_last{k}'] = (df['days_to_eom'] <= k - 1).astype(int)
+    df[f'is_first{k}'] = (df['day'] <= k).astype(int)
+
+  # 4. Fourier Transformations for Smooth Annual & Weekly Seasonality
+  for k in range(1, 6):
+    df[f'sin_y{k}'] = np.sin(TAU * k * df['doy'] / 365.25)
+    df[f'cos_y{k}'] = np.cos(TAU * k * df['doy'] / 365.25)
+  for k in range(1, 3):
+    df[f'sin_w{k}'] = np.sin(TAU * k * df['dow'] / 7.0)
+    df[f'cos_w{k}'] = np.cos(TAU * k * df['dow'] / 7.0)
+
+  # 5. Safe Lunar Calendar Drift Calculator (Tet Holiday Proximity)
+  tet_lut = {y: pd.Timestamp(v) for y, v in TET_DATES.items()}
+
+  def calculate_tet_dist(dt):
+    base_tet = tet_lut.get(dt.year)
+    if base_tet is None:
+      return 999
+    return (dt - base_tet).days
+
+  df['tet_days_diff'] = d.apply(calculate_tet_dist)
+  df['tet_in_7'] = (np.abs(df['tet_days_diff']) <= 7).astype(int)
+
+  # 6. Deterministic Recurring Promotional Exogenous Signals
+  df['is_spring_sale_window'] = (
+      ((df['month'] == 3) & (df['day'] >= 15))
+      | ((df['month'] == 4) & (df['day'] <= 15))
+  ).astype(int)
+  df['is_midyear_sale_window'] = (
+      ((df['month'] == 6) & (df['day'] >= 20))
+      | ((df['month'] == 7) & (df['day'] <= 20))
+  ).astype(int)
+  df['is_yearend_sale_window'] = (
+      ((df['month'] == 11) & (df['day'] >= 15)) | (df['month'] == 12)
+  ).astype(int)
+  df['is_double_day_promo'] = (
+      (df['month'].isin([9, 10, 11, 12])) & (df['month'] == df['day'])
+  ).astype(int)
+
+  return df
+
+# ==========================================
+# 1. LOAD DATA & BUILD FEATURE MATRICES
+# ==========================================
+print("--- [1/6] Loading historical data and building feature matrices ---")
+data_path = "data/sales.csv" if os.path.exists("data/sales.csv") else "sales.csv"
+sales_df = pd.read_csv(data_path, parse_dates=["Date"])
+
 X_train_df = build_features(sales_df["Date"])
-y_train_rev = np.log1p(sales_df["Revenue"].values) # Log stability compression
+y_train_rev = np.log1p(sales_df["Revenue"].values)
 y_train_cog = np.log1p(sales_df["COGS"].values)
 
 test_dates = pd.date_range("2023-01-01", "2024-07-01", freq="D")
@@ -66,9 +101,52 @@ X_train = X_train_df[feature_cols].values
 X_test = X_test_df[feature_cols].values
 
 # ==========================================
-# 1. Family Model 1: Ridge Regression Anchor
+# 2. IN-CONSOLE DIAGNOSTIC: HOLDOUT VALIDATION
 # ==========================================
-print("Training Family 1: Ridge parametric linear model...")
+print(
+    '--- [2/6] Running Temporal Holdout Validation Check (Train < 2022, Eval'
+    ' 2022) ---'
+)
+val_mask = X_train_df['year'] == 2022
+train_mask = X_train_df['year'] < 2022
+
+if val_mask.sum() > 0 and train_mask.sum() > 0:
+  # Create recency weights specifically for the validation check
+  val_years = X_train_df.loc[train_mask, 'year'].values
+  val_weights = np.full(train_mask.sum(), 0.10)
+  val_weights[val_years >= 2020] = 1.0  # Give 2020-2021 full weight
+
+  lgb_params_val = {
+      'objective': 'regression',
+      'metric': 'mae',
+      'learning_rate': 0.03,
+      'num_leaves': 63,
+      'verbosity': -1,
+      'seed': 42,
+  }
+  # FIXED: Passed weight=val_weights into dval_train
+  dval_train = lgb.Dataset(
+      X_train[train_mask],
+      label=y_train_rev[train_mask],
+      weight=val_weights,
+  )
+  val_model = lgb.train(lgb_params_val, dval_train, num_boost_round=600)
+
+  val_preds_log = val_model.predict(X_train[val_mask])
+  val_preds_raw = np.expm1(val_preds_log)
+  actuals_2022 = sales_df.loc[val_mask, 'Revenue'].values
+
+  mape_score = mean_absolute_percentage_error(actuals_2022, val_preds_raw) * 100
+  mae_score = mean_absolute_error(actuals_2022, val_preds_raw)
+  print(f'  --> 2022 Holdout MAPE : {mape_score:.2f}%')
+  print(f'  --> 2022 Holdout MAE  : ${mae_score:,.2f}')
+else:
+  print('  --> Skipping holdout check: insufficient historical years.')
+
+# ==========================================
+# 3. FAMILY MODEL 1: RIDGE REGRESSION ANCHOR
+# ==========================================
+print("--- [3/6] Training Family 1: Ridge parametric linear model ---")
 mu, sigma = X_train.mean(axis=0), X_train.std(axis=0) + 1e-8
 X_train_scaled = (X_train - mu) / sigma
 X_test_scaled = (X_test - mu) / sigma
@@ -80,15 +158,18 @@ p_ridge_rev = np.expm1(ridge_rev.predict(X_test_scaled))
 p_ridge_cog = np.expm1(ridge_cog.predict(X_test_scaled))
 
 # ==========================================
-# 2. Family Model 2: Base LightGBM with Era Mask Weights
+# 4. FAMILY MODEL 2 & 3: LIGHTGBM + QUARTERLY SPECIALISTS
 # ==========================================
-print("Training Family 2: LightGBM with structural sample weighting...")
-# Downweight noisy eras; prioritize stable baseline structure era (2014-2018)
+print("--- [4/6] Training Family 2 & 3: Global LightGBM + Quarterly Specialists ---")
 years_vector = X_train_df["year"].values
-sample_weights = np.full(len(X_train), 0.01)
-sample_weights[(years_vector >= 2014) & (years_vector <= 2018)] = 1.0
+sample_weights = np.full(len(X_train), 0.20)
+sample_weights[(years_vector >= 2014) & (years_vector <= 2018)] = 0.30   # Structural base era
+sample_weights[(years_vector >= 2021) & (years_vector <= 2022)] = 1.00  # Recent recovery era
 
-lgb_params = {'objective': 'regression', 'metric': 'mae', 'learning_rate': 0.03, 'num_leaves': 63, 'verbosity': -1, 'seed': 42}
+lgb_params = {
+    'objective': 'regression', 'metric': 'mae', 'learning_rate': 0.03, 
+    'num_leaves': 63, 'verbosity': -1, 'seed': 42
+}
 dtrain_rev = lgb.Dataset(X_train, label=y_train_rev, weight=sample_weights)
 dtrain_cog = lgb.Dataset(X_train, label=y_train_cog, weight=sample_weights)
 
@@ -98,18 +179,13 @@ lgb_cog = lgb.train(lgb_params, dtrain_cog, num_boost_round=1200)
 p_lgb_rev = np.expm1(lgb_rev.predict(X_test))
 p_lgb_cog = np.expm1(lgb_cog.predict(X_test))
 
-# ==========================================
-# 3. Quarterly Specialists (8 Isolated LightGBM Instances)
-# ==========================================
-print("Training Quarterly Specialists to tackle localized variance volatility...")
+# Quarterly Specialists
 quarter_test_vector = X_test_df["quarter"].values
+quarter_train_vector = X_train_df["quarter"].values
 spec_composed_rev = np.zeros(len(X_test))
 spec_composed_cog = np.zeros(len(X_test))
 
-quarter_train_vector = X_train_df["quarter"].values
-
 for q in [1, 2, 3, 4]:
-    # Inject a 2.0x weight amplification for records belonging to the target quarter
     q_weights = sample_weights.copy()
     q_weights[quarter_train_vector == q] *= 2.0
     
@@ -124,28 +200,55 @@ for q in [1, 2, 3, 4]:
     spec_composed_cog[test_mask] = np.expm1(m_spec_cog.predict(X_test[test_mask]))
 
 # ==========================================
-# Phase 5: Hierarchical Stacking & Level Calibration Blend
+# 5. ENSEMBLING & CALIBRATION LAYER
 # ==========================================
-print("Executing hierarchical ensembling and calibration layer...")
-# Tier 1: Merge tree algorithms
+print("--- [5/6] Executing hierarchical ensembling and calibration ---")
 ALPHA = 0.60
 lgb_blend_rev = (ALPHA * spec_composed_rev) + ((1 - ALPHA) * p_lgb_rev)
 lgb_blend_cog = (ALPHA * spec_composed_cog) + ((1 - ALPHA) * p_lgb_cog)
 
-# Tier 2: Cross-family mathematical integration blend
 raw_rev = (0.80 * lgb_blend_rev) + (0.20 * p_ridge_rev)
 raw_cog = (0.80 * lgb_blend_cog) + (0.20 * p_ridge_cog)
 
-# Tier 3: Hard Empirical Calibration Scaling to correct historic regime shift drift
-CR, CC = 1.26, 1.32 # Fine-tuned competition scale multipliers
+# Empirical scaling adjustment
+CR, CC = 1.00, 1.00
 final_rev = raw_rev * CR
 final_cog = raw_cog * CC
 
-# Export submission payload file
+# ==========================================
+# 6. IN-CONSOLE SANITY CHECKS & EXPORT
+# ==========================================
+print("--- [6/6] Verifying Forecast Sanity & Generating Submission ---")
+
+# A. Assertion checks
+assert np.isnan(final_rev).sum() == 0, "ERROR: Forecast contains NaN values!"
+assert (final_rev < 0).sum() == 0, "ERROR: Forecast contains negative revenue values!"
+
+# B. Summary Table: Historical 2022 vs. Forecast 2023-2024
+hist_mean = sales_df.loc[sales_df["Date"].dt.year == 2022, "Revenue"].mean()
+hist_max = sales_df.loc[sales_df["Date"].dt.year == 2022, "Revenue"].max()
+pred_mean = final_rev.mean()
+pred_max = final_rev.max()
+
+print("\n======================= MODEL SANITY SCORECARD =======================")
+print(f"  Metric              |  2022 Actual (Recent)  |  2023-2024 Forecast")
+print(f"----------------------|------------------------|---------------------")
+print(f"  Daily Mean Revenue  |  ${hist_mean:19,.2f} |  ${pred_mean:17,.2f}")
+print(f"  Daily Peak Revenue  |  ${hist_max:19,.2f} |  ${pred_max:17,.2f}")
+print("======================================================================\n")
+
+# C. Promo Signal Sanity Check
+promo_days_mask = X_test_df["is_double_day_promo"] == 1
+if promo_days_mask.sum() > 0:
+    promo_avg = final_rev[promo_days_mask].mean()
+    base_avg = final_rev[~promo_days_mask].mean()
+    lift_pct = ((promo_avg - base_avg) / base_avg) * 100
+    print(f"  --> Double-Day Promo Lift Check: +{lift_pct:.1f}% higher vs. regular baseline days.")
+
 submission = pd.DataFrame({
     'Date': test_dates.strftime('%Y-%m-%d'),
     'Revenue': final_rev,
     'COGS': final_cog
 })
 submission.to_csv("submission.csv", index=False)
-print("🎉 Submission.csv successfully compiled and written to disk without system memory exhaustion!")
+print("submission.csv successfully compiled and written to disk!")
