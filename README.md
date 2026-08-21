@@ -1,5 +1,3 @@
-Here is the fully updated `README.md`. It has been completely rewritten to reflect all the advanced algorithmic tuning, domain-specific feature engineering (Vietnamese streetwear psychology), and the final integrated Streamlit dashboard we built together.
-
 ```markdown
 # 📊 Retail Datathon 2026 — Executive BI Suite & Forecasting Engine
 
