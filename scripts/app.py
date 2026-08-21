@@ -68,9 +68,11 @@ def load_all_datasets():
     data["rfm"] = read_csv_safe("dim_customers_rfm.csv")
     data["cohorts"] = read_csv_safe("agg_cohort_retention.csv")
     data["orders"] = read_csv_safe("fact_orders_enriched.csv", date_cols=["order_date", "ship_date", "delivery_date"])
+    if data["orders"].empty:
+        data["orders"] = read_csv_safe("fact_orders_enriched_full.csv", date_cols=["order_date", "ship_date", "delivery_date"])
     data["products"] = read_csv_safe("dim_products.csv")
     data["web_traffic"] = read_csv_safe("web_traffic.csv", date_cols=["date"])
-    data["inventory"] = read_csv_safe("inventory.csv", date_cols=["snapshot_date"])
+    data["inventory"] = read_csv_safe("inventory_short.csv", date_cols=["snapshot_date"])
     
     # NEW: Loading the ML Forecast output
     data["forecast"] = read_csv_safe("submission.csv", date_cols=["Date"])
@@ -447,7 +449,7 @@ with tabs[4]:
                 fig_d5_desc.update_layout(height=360, margin=dict(l=0, r=0, t=10, b=0), showlegend=False)
                 st.plotly_chart(fig_d5_desc, width="stretch")
             else:
-                st.info("Inventory snapshot requires `inventory.csv`.")
+                st.info("Inventory snapshot requires `inventory_short.csv`.")
 
         with row1_col2:
             st.markdown("#### Diagnostic: Fulfillment Lead Time by Region")

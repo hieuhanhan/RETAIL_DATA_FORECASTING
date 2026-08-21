@@ -157,7 +157,7 @@ fact_orders["order_month"] = fact_orders["order_date"].dt.month
 fact_orders["order_quarter"] = fact_orders["order_date"].dt.quarter
 fact_orders["order_ym"] = fact_orders["order_date"].dt.to_period("M").astype(str)
 
-fact_orders.to_csv(os.path.join(OUT_DIR, "fact_orders_enriched.csv"), index=False)
+fact_orders.to_csv(os.path.join(OUT_DIR, "fact_orders_enriched_full.csv"), index=False)
 
 
 # ==========================================
