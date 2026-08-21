@@ -41,20 +41,10 @@ The BI Suite provides full-stack **Descriptive, Diagnostic, Predictive, and Pres
 | Tab | Area | Core Strategic Questions Addressed | Key Visualizations |
 | --- | --- | --- | --- |
 | **D1** | **Revenue & ML Forecast** | What is the historical growth, and what is the 2023-2024 projection? | • **Merged Historical vs. ML Forecast Chart**<br>
-
- |
-| **D2** | **Customer Segmentation** | Who are our high-value Champions, and who is churning? | • RFM Segment Population & Lifetime Value<br>
-
- |
-| **D3** | **Product Analysis** | Which SKUs drive real profitability and quality retention? | • Category Volume Share Pie Chart<br>
-
- |
-| **D4** | **Marketing & Channels** | Which acquisition channels generate the best ROI? | • Monthly Revenue Share by Channel<br>
-
- |
-| **D5** | **Supply Chain** | Are delivery lead times optimized for the ML peak forecasts? | • **Top 20 SKU Stockout vs. Sell-Through Risk**<br>
-
- |
+|**D2** | **Customer Segmentation** | Who are our high-value Champions, and who is churning? | • RFM Segment Population & Lifetime Value<br>
+**D3** | **Product Analysis** | Which SKUs drive real profitability and quality retention? | • Category Volume Share Pie Chart<br>
+**D4** | **Marketing & Channels** | Which acquisition channels generate the best ROI? | • Monthly Revenue Share by Channel<br>
+**D5** | **Supply Chain** | Are delivery lead times optimized for the ML peak forecasts? | • **Top 20 SKU Stockout vs. Sell-Through Risk**<br>
 
 ---
 
