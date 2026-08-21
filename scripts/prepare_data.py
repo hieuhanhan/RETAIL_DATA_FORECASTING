@@ -1,15 +1,17 @@
 import pandas as pd
 import numpy as np
 import os
+from pathlib import Path
 
-# Define path constants
-DATA_DIR = "data"
-OUT_DIR = "tableau_data"
-os.makedirs(OUT_DIR, exist_ok=True)
+# Resolve paths from this script so execution does not depend on the current folder.
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+DATA_DIR = PROJECT_ROOT / "data"
+OUT_DIR = PROJECT_ROOT / "tableau_data"
+OUT_DIR.mkdir(exist_ok=True)
 
 def load_table(file_name, date_cols=None):
-    path = os.path.join(DATA_DIR, file_name)
-    if not os.path.exists(path):
+    path = DATA_DIR / file_name
+    if not path.exists():
         print(f"Warning: {file_name} missing.")
         return None
     df = pd.read_csv(path, parse_dates=date_cols)
